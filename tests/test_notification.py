@@ -584,6 +584,157 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
         mock_brief.assert_called_once()
 
     @mock.patch("src.notification.get_config")
+    def test_generate_aggregate_report_forwards_summary_only_override(self, mock_get_config: mock.MagicMock):
+        """本地归档路径传 summary_only=False 时必须穿透到 dashboard 生成。"""
+        mock_get_config.return_value = _make_config(report_summary_only=True)
+        service = NotificationService()
+        result = AnalysisResult(
+            code="600519",
+            name="贵州茅台",
+            sentiment_score=72,
+            trend_prediction="看多",
+            operation_advice="持有",
+            analysis_summary="稳健",
+        )
+
+        with mock.patch.object(service, "generate_dashboard_report", return_value="dashboard") as mock_dashboard:
+            service.generate_aggregate_report([result], "full", summary_only=False)
+        mock_dashboard.assert_called_once()
+        self.assertFalse(mock_dashboard.call_args.kwargs.get("summary_only"))
+
+    @mock.patch("src.notification.get_config")
+    def test_summary_only_override_false_renders_details(self, mock_get_config: mock.MagicMock):
+        """REPORT_SUMMARY_ONLY=true 时，summary_only=False 覆盖仍输出个股详情。"""
+        mock_get_config.return_value = _make_config(
+            report_summary_only=True,
+            report_renderer_enabled=False,
+        )
+        service = NotificationService()
+        result = AnalysisResult(
+            code="600519",
+            name="贵州茅台",
+            sentiment_score=72,
+            trend_prediction="看多",
+            operation_advice="持有",
+            analysis_summary="稳健",
+        )
+
+        summary_out = service.generate_dashboard_report([result])
+        full_out = service.generate_dashboard_report([result], summary_only=False)
+        self.assertNotIn("## ", summary_out.split("分析结果摘要")[-1])
+        self.assertIn("贵州茅台 (600519)", full_out)
+
+    @mock.patch("src.notification.get_config")
+    def test_plain_summary_context_disabled_by_default(self, mock_get_config: mock.MagicMock):
+        mock_get_config.return_value = _make_config()
+        service = NotificationService()
+        result = AnalysisResult(
+            code="600519",
+            name="贵州茅台",
+            sentiment_score=72,
+            trend_prediction="看多",
+            operation_advice="持有",
+            analysis_summary="稳健",
+        )
+        context = service._get_plain_summary_context([result])
+        self.assertFalse(context["plain_summary"])
+        self.assertEqual(context["previous_advice_by_code"], {})
+
+    @mock.patch("src.notification.get_config")
+    def test_plain_summary_context_collects_previous_advice(self, mock_get_config: mock.MagicMock):
+        mock_get_config.return_value = _make_config(report_plain_summary=True)
+        service = NotificationService()
+        result = AnalysisResult(
+            code="600519",
+            name="贵州茅台",
+            sentiment_score=72,
+            trend_prediction="看多",
+            operation_advice="持有",
+            analysis_summary="稳健",
+        )
+        result.query_id = "run-today"
+
+        with mock.patch(
+            "src.services.history_comparison_service.get_signal_changes_batch",
+            return_value={"600519": [{"operation_advice": "买入"}]},
+        ) as mock_batch:
+            context = service._get_plain_summary_context([result])
+
+        self.assertTrue(context["plain_summary"])
+        self.assertEqual(context["previous_advice_by_code"], {"600519": "买入"})
+        self.assertEqual(mock_batch.call_args.kwargs.get("exclude_query_ids"), {"600519": "run-today"})
+
+    @mock.patch("src.services.report_renderer.get_config")
+    @mock.patch("src.notification.get_config")
+    def test_dashboard_report_end_to_end_plain_summary(
+        self,
+        mock_get_config: mock.MagicMock,
+        mock_renderer_config: mock.MagicMock,
+    ):
+        """开启 REPORT_PLAIN_SUMMARY + REPORT_SUMMARY_ONLY 时推送输出白话摘要。"""
+        config = _make_config(
+            report_renderer_enabled=True,
+            report_summary_only=True,
+            report_plain_summary=True,
+        )
+        mock_get_config.return_value = config
+        mock_renderer_config.return_value = config
+        service = NotificationService()
+        result = AnalysisResult(
+            code="300502",
+            name="新易盛",
+            sentiment_score=42,
+            trend_prediction="空头趋势",
+            operation_advice="减仓",
+            analysis_summary="摘要",
+            decision_type="sell",
+            dashboard={
+                "core_conclusion": {
+                    "one_sentence": "核心结论。",
+                    "plain_language": {
+                        "action_now": "别买，持有的话反弹时减仓",
+                        "change_condition": "跌破 388 元全部卖出",
+                        "key_risk": "利润下滑，可能继续下跌",
+                    },
+                },
+            },
+        )
+        result.query_id = "run-today"
+
+        with mock.patch(
+            "src.services.history_comparison_service.get_signal_changes_batch",
+            return_value={"300502": [{"operation_advice": "持有"}]},
+        ):
+            out = service.generate_dashboard_report([result])
+
+        self.assertIn("今日有变", out)
+        self.assertIn("（昨日：持有）", out)
+        self.assertIn("现在：别买，持有的话反弹时减仓", out)
+        self.assertNotIn("### 📰", out)  # summary_only：不含个股详情区块
+
+    @mock.patch("src.notification.get_config")
+    def test_plain_summary_context_lookup_failure_degrades(self, mock_get_config: mock.MagicMock):
+        mock_get_config.return_value = _make_config(report_plain_summary=True)
+        service = NotificationService()
+        result = AnalysisResult(
+            code="600519",
+            name="贵州茅台",
+            sentiment_score=72,
+            trend_prediction="看多",
+            operation_advice="持有",
+            analysis_summary="稳健",
+        )
+
+        with mock.patch(
+            "src.services.history_comparison_service.get_signal_changes_batch",
+            side_effect=RuntimeError("db down"),
+        ):
+            context = service._get_plain_summary_context([result])
+
+        self.assertTrue(context["plain_summary"])
+        self.assertEqual(context["previous_advice_by_code"], {})
+
+    @mock.patch("src.notification.get_config")
     def test_generate_single_stock_report_keeps_legacy_simple_format(self, mock_get_config: mock.MagicMock):
         mock_get_config.return_value = _make_config(report_renderer_enabled=True)
         service = NotificationService()

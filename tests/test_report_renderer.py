@@ -354,3 +354,132 @@ class TestReportRenderer(unittest.TestCase):
         out = render("markdown", [], summary_only=True)
         self.assertIsNotNone(out)
         self.assertIn("0", out)
+
+
+class TestAdviceActionFamily(unittest.TestCase):
+    """advice_action_family — equivalence classes for changed-advice detection."""
+
+    def test_families(self) -> None:
+        from src.services.report_renderer import advice_action_family
+
+        self.assertEqual(advice_action_family("减仓"), "sell")
+        self.assertEqual(advice_action_family("卖出"), "sell")
+        self.assertEqual(advice_action_family("减仓/卖出（原建议已被风控下调）"), "sell")
+        self.assertEqual(advice_action_family("持有"), "hold")
+        self.assertEqual(advice_action_family("持有/轻仓低吸"), "hold")
+        self.assertEqual(advice_action_family("买入"), "buy")
+        self.assertEqual(advice_action_family("观望"), "watch")
+        self.assertEqual(advice_action_family("Wait"), "watch")
+        self.assertEqual(advice_action_family(""), "")
+        self.assertEqual(advice_action_family(None), "")
+
+
+class TestPlainSummaryRendering(unittest.TestCase):
+    """REPORT_PLAIN_SUMMARY rendering contract (busy-reader summary)."""
+
+    @staticmethod
+    def _plain_result() -> AnalysisResult:
+        return _make_result(
+            code="300502",
+            name="新易盛",
+            operation_advice="减仓",
+            decision_type="sell",
+            dashboard={
+                "core_conclusion": {
+                    "one_sentence": "核心结论。",
+                    "position_advice": {
+                        "no_position": "暂不参与。",
+                        "has_position": "反弹时逐步减仓。",
+                    },
+                    "plain_language": {
+                        "action_now": "还在下跌，别买；持有的话反弹时卖出一部分",
+                        "change_condition": "跌破 388 元就全部卖出",
+                        "key_risk": "利润下滑，股价可能继续走低",
+                    },
+                },
+                "intelligence": {"risk_alerts": ["估值仍高"]},
+                "battle_plan": {"sniper_points": {"stop_loss": "388"}},
+            },
+        )
+
+    def test_plain_summary_partitions_changed_and_unchanged(self) -> None:
+        changed = self._plain_result()
+        unchanged = _make_result(
+            code="600021", name="上海电力", operation_advice="减仓", decision_type="sell"
+        )
+        out = render(
+            "markdown",
+            [changed, unchanged],
+            summary_only=True,
+            extra_context={
+                "plain_summary": True,
+                "previous_advice_by_code": {"300502": "持有", "600021": "卖出"},
+                "report_language": "zh",
+            },
+        )
+        self.assertIsNotNone(out)
+        self.assertIn("今日有变（1）", out)
+        self.assertIn("（昨日：持有）", out)
+        self.assertIn("现在：还在下跌，别买；持有的话反弹时卖出一部分", out)
+        self.assertIn("何时改变：跌破 388 元就全部卖出", out)
+        self.assertIn("最大风险：利润下滑，股价可能继续走低", out)
+        self.assertIn("维持原判（1）", out)
+        self.assertIn("上海电力·减仓", out)
+
+    def test_plain_summary_missing_history_counts_as_changed(self) -> None:
+        result = self._plain_result()
+        out = render(
+            "markdown",
+            [result],
+            summary_only=True,
+            extra_context={
+                "plain_summary": True,
+                "previous_advice_by_code": {},
+                "report_language": "zh",
+            },
+        )
+        self.assertIsNotNone(out)
+        self.assertIn("今日有变（1）", out)
+        self.assertNotIn("昨日：", out)
+
+    def test_plain_summary_fallback_synthesizes_lines(self) -> None:
+        result = _make_result(
+            code="688525",
+            name="佰维存储",
+            operation_advice="观望",
+            decision_type="hold",
+            dashboard={
+                "core_conclusion": {
+                    "one_sentence": "核心结论。",
+                    "position_advice": {"has_position": "反弹时降低仓位。"},
+                },
+                "intelligence": {"risk_alerts": ["主力资金持续流出"]},
+                "battle_plan": {"sniper_points": {"stop_loss": "196"}},
+            },
+        )
+        out = render(
+            "markdown",
+            [result],
+            summary_only=True,
+            extra_context={
+                "plain_summary": True,
+                "previous_advice_by_code": {"688525": "持有"},
+                "report_language": "zh",
+            },
+        )
+        self.assertIsNotNone(out)
+        self.assertIn("现在：反弹时降低仓位。", out)
+        self.assertIn("何时改变：跌破 196 应止损离场", out)
+        self.assertIn("最大风险：主力资金持续流出", out)
+
+    def test_plain_summary_off_keeps_legacy_summary(self) -> None:
+        result = self._plain_result()
+        out = render(
+            "markdown",
+            [result],
+            summary_only=True,
+            extra_context={"report_language": "zh"},
+        )
+        self.assertIsNotNone(out)
+        self.assertIn("**新易盛(300502)**: 减仓 | 评分", out)
+        self.assertNotIn("今日有变", out)

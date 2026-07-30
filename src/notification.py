@@ -321,17 +321,58 @@ class NotificationService(
         self._history_compare_cache[cache_key] = history_by_code
         return {"history_by_code": history_by_code}
 
+    def _get_plain_summary_context(self, results: List[AnalysisResult]) -> Dict[str, Any]:
+        """Build plain-summary context: flag + previous advice per code (fail-open).
+
+        The previous advice powers the "今日有变/维持原判" partition in the
+        plain summary. Lookup failures degrade to "all changed" rendering
+        rather than blocking the report.
+        """
+        config = get_config()
+        if not getattr(config, 'report_plain_summary', False) or not results:
+            return {"plain_summary": False, "previous_advice_by_code": {}}
+
+        previous: Dict[str, str] = {}
+        try:
+            from src.services.history_comparison_service import get_signal_changes_batch
+
+            exclude_ids = {
+                r.code: r.query_id
+                for r in results
+                if getattr(r, 'query_id', None)
+            }
+            codes = list(dict.fromkeys(r.code for r in results))
+            history = get_signal_changes_batch(codes, limit=1, exclude_query_ids=exclude_ids)
+            for code, signals in (history or {}).items():
+                if signals:
+                    previous[code] = str(signals[0].get("operation_advice") or "")
+        except Exception as e:
+            logger.debug("Plain summary previous-advice lookup skipped: %s", e)
+
+        return {"plain_summary": True, "previous_advice_by_code": previous}
+
     def generate_aggregate_report(
         self,
         results: List[AnalysisResult],
         report_type: Any,
         report_date: Optional[str] = None,
+        summary_only: Optional[bool] = None,
     ) -> str:
-        """Generate the aggregate report content used by merge/save/push paths."""
+        """Generate the aggregate report content used by merge/save/push paths.
+
+        Args:
+            summary_only: Override REPORT_SUMMARY_ONLY for this call. ``None``
+                keeps the configured behavior; ``False`` forces the full report
+                (used by local file archiving so details are never lost).
+        """
         normalized_type = self._normalize_report_type(report_type)
         if normalized_type == ReportType.BRIEF:
             return self.generate_brief_report(results, report_date=report_date)
-        return self.generate_dashboard_report(results, report_date=report_date)
+        return self.generate_dashboard_report(
+            results,
+            report_date=report_date,
+            summary_only=summary_only,
+        )
 
     def _collect_models_used(self, results: List[AnalysisResult]) -> List[str]:
         if not self._should_show_llm_model():
@@ -1100,7 +1141,8 @@ class NotificationService(
     def generate_dashboard_report(
         self,
         results: List[AnalysisResult],
-        report_date: Optional[str] = None
+        report_date: Optional[str] = None,
+        summary_only: Optional[bool] = None,
     ) -> str:
         """
         生成决策仪表盘格式的日报（详细版）
@@ -1110,11 +1152,15 @@ class NotificationService(
         Args:
             results: 分析结果列表
             report_date: 报告日期（默认今天）
+            summary_only: 覆盖 REPORT_SUMMARY_ONLY（None=按配置；False=强制全文，用于本地归档）
 
         Returns:
             Markdown 格式的决策仪表盘日报
         """
         config = get_config()
+        effective_summary_only = (
+            self._report_summary_only if summary_only is None else bool(summary_only)
+        )
         report_language = self._get_report_language(results)
         labels = get_report_labels(report_language)
 
@@ -1137,9 +1183,10 @@ class NotificationService(
                 platform='markdown',
                 results=results,
                 report_date=report_date,
-                summary_only=self._report_summary_only,
+                summary_only=effective_summary_only,
                 extra_context={
                     **self._get_history_compare_context(results),
+                    **self._get_plain_summary_context(results),
                     "report_language": report_language,
                 },
             )
@@ -1187,7 +1234,7 @@ class NotificationService(
             ])
 
         # 逐个股票的决策仪表盘（Issue #262: summary_only 时跳过详情）
-        if not self._report_summary_only:
+        if not effective_summary_only:
             for result in sorted_results:
                 signal_text, signal_emoji, signal_tag = self._get_signal_level(result)
                 dashboard = result.dashboard if hasattr(result, 'dashboard') and result.dashboard else {}
@@ -1479,7 +1526,10 @@ class NotificationService(
                 results=results,
                 report_date=datetime.now().strftime('%Y-%m-%d'),
                 summary_only=self._report_summary_only,
-                extra_context={"report_language": report_language},
+                extra_context={
+                    **self._get_plain_summary_context(results),
+                    "report_language": report_language,
+                },
             )
             if out:
                 return out

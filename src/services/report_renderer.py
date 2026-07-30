@@ -10,6 +10,7 @@ Any expensive data preparation should be injected by the caller via extra_contex
 """
 
 import logging
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -74,6 +75,98 @@ def _resolve_templates_dir() -> Path:
     return templates_dir
 
 
+# ---------------------------------------------------------------------------
+# Plain summary (busy non-professional readers)
+# ---------------------------------------------------------------------------
+
+# Action families used to decide "advice changed vs unchanged" between days.
+# Ordered by risk priority: bearish wins in mixed text, hold before bullish so
+# labels like "持有/轻仓低吸" classify conservatively.
+_ADVICE_FAMILY_KEYWORDS = (
+    ("sell", ("清仓", "卖出", "减仓", "sell", "reduce")),
+    ("hold", ("持有", "hold")),
+    ("buy", ("买入", "加仓", "建仓", "低吸", "增持", "buy", "add")),
+    ("watch", ("观望", "等待", "回避", "wait", "watch")),
+)
+
+
+def advice_action_family(advice: Any) -> str:
+    """Map an operation-advice label/text to an action family (sell/hold/buy/watch)."""
+    text = str(advice or "").strip().lower()
+    if not text:
+        return ""
+    for family, keywords in _ADVICE_FAMILY_KEYWORDS:
+        for keyword in keywords:
+            if keyword in text:
+                return family
+    return ""
+
+
+def _shorten(text: Any, limit: int) -> str:
+    value = str(text or "").strip()
+    if len(value) <= limit:
+        return value
+    return value[: max(0, limit - 1)].rstrip() + "…"
+
+
+def _build_plain_language(
+    result: AnalysisResult,
+    labels: Dict[str, str],
+    report_language: str,
+) -> Dict[str, str]:
+    """Return the plain-language trio, synthesizing fallbacks when absent.
+
+    The LLM-provided ``dashboard.core_conclusion.plain_language`` wins; missing
+    keys degrade to position advice / stop-loss / risk-alert derived text so
+    the plain summary never renders empty bullets.
+    """
+    dashboard = getattr(result, "dashboard", None) or {}
+    core = dashboard.get("core_conclusion") or {}
+    provided = core.get("plain_language")
+    plain: Dict[str, str] = {}
+    if isinstance(provided, dict):
+        for key in ("action_now", "change_condition", "key_risk"):
+            value = provided.get(key)
+            if isinstance(value, str) and value.strip():
+                plain[key] = _shorten(value.strip(), 60)
+
+    if "action_now" not in plain:
+        position_advice = core.get("position_advice") or {}
+        action = position_advice.get("has_position") or position_advice.get("no_position")
+        if not action:
+            action = localize_operation_advice(result.operation_advice, report_language)
+        plain["action_now"] = _shorten(action, 60)
+
+    if "change_condition" not in plain:
+        battle = dashboard.get("battle_plan") or {}
+        sniper = battle.get("sniper_points") or {}
+        stop_loss = _clean_sniper_value(sniper.get("stop_loss"))
+        condition = ""
+        if stop_loss and stop_loss not in ("N/A", "待补充"):
+            condition = labels.get("plain_stop_loss_condition", "跌破 {stop_loss} 应止损离场").format(
+                stop_loss=stop_loss
+            )
+        else:
+            phase_decision = dashboard.get("phase_decision") or {}
+            watch_conditions = phase_decision.get("watch_conditions") or []
+            if watch_conditions and isinstance(watch_conditions, list):
+                condition = _shorten(watch_conditions[0], 60)
+        if condition:
+            plain["change_condition"] = _shorten(condition, 60)
+
+    if "key_risk" not in plain:
+        intel = dashboard.get("intelligence") or {}
+        risk_alerts = intel.get("risk_alerts") or []
+        risk = risk_alerts[0] if isinstance(risk_alerts, list) and risk_alerts else ""
+        if not risk:
+            risk = getattr(result, "risk_warning", "") or ""
+            risk = re.split(r"[；;。]", risk)[0] if risk else ""
+        if risk:
+            plain["key_risk"] = _shorten(risk, 50)
+
+    return plain
+
+
 def render(
     platform: str,
     results: List[AnalysisResult],
@@ -122,12 +215,21 @@ def render(
     )
     labels = get_report_labels(report_language)
 
+    # Plain-summary inputs (busy-reader mode); fail-open defaults keep legacy shape
+    plain_summary = bool((extra_context or {}).get("plain_summary"))
+    previous_advice_by_code = (extra_context or {}).get("previous_advice_by_code") or {}
+    if not isinstance(previous_advice_by_code, dict):
+        previous_advice_by_code = {}
+
     # Build template context with pre-computed signal levels (sorted by score)
     sorted_results = sorted(results, key=lambda x: x.sentiment_score, reverse=True)
     sorted_enriched = []
     for r in sorted_results:
         st, se, _ = get_signal_level(r.operation_advice, r.sentiment_score, report_language)
         rn = get_localized_stock_name(r.name, r.code, report_language)
+        previous_advice_raw = previous_advice_by_code.get(r.code, "")
+        previous_family = advice_action_family(previous_advice_raw)
+        current_family = advice_action_family(r.operation_advice)
         sorted_enriched.append({
             "result": r,
             "signal_text": st,
@@ -135,6 +237,14 @@ def render(
             "stock_name": _escape_md(rn),
             "localized_operation_advice": localize_operation_advice(r.operation_advice, report_language),
             "localized_trend_prediction": localize_trend_prediction(r.trend_prediction, report_language),
+            "plain": _build_plain_language(r, labels, report_language) if plain_summary else {},
+            "previous_advice": (
+                _shorten(localize_operation_advice(previous_advice_raw, report_language), 12)
+                if previous_family
+                else ""
+            ),
+            # 无历史记录（首次分析/查询失败）按"有变"处理，宁多看一眼不漏
+            "advice_changed": (not previous_family) or previous_family != current_family,
         })
 
     buy_count = sum(1 for r in results if getattr(r, "decision_type", "") == "buy")
@@ -185,6 +295,7 @@ def render(
         "results": sorted_results,
         "enriched": sorted_enriched,  # Sorted by sentiment_score desc
         "summary_only": summary_only,
+        "plain_summary": plain_summary,
         "buy_count": buy_count,
         "sell_count": sell_count,
         "hold_count": hold_count,

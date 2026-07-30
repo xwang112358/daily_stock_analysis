@@ -1799,6 +1799,32 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         ],
         "warning_codes": [],
     },
+    "REPORT_PLAIN_SUMMARY": {
+        "title": "Report Plain Summary",
+        "description": "Rewrite the summary section for busy non-professional readers: changed-advice stocks first with three plain-language lines (action now / trigger to change / key risk), unchanged stocks merged into one line. Requires REPORT_RENDERER_ENABLED=true.",
+        "category": "notification",
+        "data_type": "boolean",
+        "ui_control": "switch",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "false",
+        "options": [],
+        "validation": {},
+        "display_order": 53,
+        "help_key": "settings.report.REPORT_SUMMARY_ONLY",
+        "examples": [
+            "REPORT_PLAIN_SUMMARY=true",
+            "REPORT_PLAIN_SUMMARY=false",
+        ],
+        "docs": [
+            {
+                "label": "完整指南：环境变量完整列表",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/full-guide.md#环境变量完整列表",
+            },
+        ],
+        "warning_codes": [],
+    },
     "REPORT_SHOW_LLM_MODEL": {
         "title": "Show LLM Model in Reports",
         "description": "Show the LLM model name in notification report footers. Disable to hide runtime model metadata. This option only affects report rendering and does not change runtime provider/model/Base URL/LiteLLM routing, migration, persistence, or cleanup behavior.",

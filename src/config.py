@@ -944,8 +944,10 @@ class Config:
     report_type: str = "simple"
     report_language: str = "zh"
 
-    # 仅分析结果摘要：true 时只推送汇总，不含个股详情（Issue #262）
+    # 仅分析结果摘要：true 时只推送汇总，不含个股详情（Issue #262）；本地报告文件始终保留全文
     report_summary_only: bool = False
+    # 白话摘要：true 时摘要区改为"今日有变优先 + 白话三行（现在做什么/何时改变/最大风险）"，面向非专业读者
+    report_plain_summary: bool = False
     report_show_llm_model: bool = True
 
     # Report Engine P0: Jinja2 renderer and integrity checks
@@ -1860,6 +1862,7 @@ class Config:
             report_type=cls._parse_report_type(os.getenv('REPORT_TYPE', 'simple')),
             report_language=cls._parse_report_language(report_language_raw),
             report_summary_only=os.getenv('REPORT_SUMMARY_ONLY', 'false').lower() == 'true',
+            report_plain_summary=os.getenv('REPORT_PLAIN_SUMMARY', 'false').lower() == 'true',
             report_show_llm_model=report_show_llm_model,
             report_templates_dir=os.getenv('REPORT_TEMPLATES_DIR', 'templates'),
             report_renderer_enabled=os.getenv('REPORT_RENDERER_ENABLED', 'false').lower() == 'true',

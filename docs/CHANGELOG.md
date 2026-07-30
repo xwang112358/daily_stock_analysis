@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] AgentMemory 补全回测闭环：`get_stock_history` 关联已完成回测结果（was_correct/窗口收益），新增 `get_backtest_feedback` 注入个股与全局回测摘要（方向准确率/胜率/止损触发率，样本≥5 才注入），DecisionAgent 增加"历史多头准确率低时收敛为观望并要求右侧确认"的指引；均在 `AGENT_MEMORY_ENABLED=true` 时生效，失败静默降级不影响分析。
 - [改进] 回测引擎 v2 口径：观望/等待类建议改按 `not_up` 评估（评估窗口内未错过超过中性带的上涨即算对），替代旧的 `flat` 横盘口径——高波动股票下旧口径几乎必判错；`BACKTEST_ENGINE_VERSION` 建议随语义升级设为 `v2` 以区分新旧结果。
 - [修复] Agent 仪表盘 `analysis_summary` 与 `one_sentence` 兜底截断改为句子边界截断并放宽至 300 字符，修复"一句话决策"以"…"截断在句中的问题。
+- [新功能] 新增 `REPORT_PLAIN_SUMMARY`（默认 `false`，需配合 `REPORT_RENDERER_ENABLED=true`）：报告摘要区改为面向非专业读者的白话模式——建议与昨日不同的股票置顶展示"现在做什么/何时改变/最大风险"三行白话（新增 `dashboard.core_conclusion.plain_language` 字段，DecisionAgent 生成，缺失时由 position_advice/止损位/风险警报自动合成），建议未变的股票合并为一行"维持原判"；昨日建议经 `history_comparison_service` 查询、按动作族系（买入/持有/观望/卖出）比较，查询失败降级为全部按"有变"展示。
+- [改进] `REPORT_SUMMARY_ONLY=true` 时本地 `reports/` 报告文件始终保留全文详情（`generate_aggregate_report` 新增 `summary_only` 覆盖参数，本地归档强制全文），只有推送内容被精简；原先本地文件会跟随开关同时丢失详情。
 
 ## [3.24.1] - 2026-06-28
 

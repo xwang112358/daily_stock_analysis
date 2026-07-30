@@ -3119,9 +3119,9 @@ class StockAnalysisPipeline:
         results: List[AnalysisResult],
         report_type: ReportType = ReportType.SIMPLE,
     ) -> None:
-        """保存分析报告到本地文件（与通知推送解耦）"""
+        """保存分析报告到本地文件（与通知推送解耦；始终保留全文详情）"""
         try:
-            report = self._generate_aggregate_report(results, report_type)
+            report = self._generate_aggregate_report(results, report_type, summary_only=False)
             filepath = self.notifier.save_report_to_file(report)
             logger.info(f"决策仪表盘日报已保存: {filepath}")
         except Exception as e:
@@ -3658,11 +3658,17 @@ class StockAnalysisPipeline:
         self,
         results: List[AnalysisResult],
         report_type: ReportType,
+        summary_only: Optional[bool] = None,
     ) -> str:
         """Generate aggregate report with backward-compatible notifier fallback."""
         generator = getattr(self.notifier, "generate_aggregate_report", None)
         if callable(generator):
-            return generator(results, report_type)
+            try:
+                return generator(results, report_type, summary_only=summary_only)
+            except TypeError:
+                # Older notifier implementations (tests/mocks) without the
+                # summary_only parameter keep their original behavior.
+                return generator(results, report_type)
         if report_type == ReportType.BRIEF and hasattr(self.notifier, "generate_brief_report"):
             return self.notifier.generate_brief_report(results)
         return self.notifier.generate_dashboard_report(results)

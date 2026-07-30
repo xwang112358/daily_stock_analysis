@@ -922,6 +922,8 @@ class AgentOrchestrator:
         position_advice.setdefault("no_position", defaults["no_position"])
         position_advice.setdefault("has_position", defaults["has_position"])
 
+        core["plain_language"] = _sanitize_plain_language(core.get("plain_language"))
+
         key_levels = self._collect_key_levels(ctx, payload, dashboard_block)
         sniper = battle.get("sniper_points")
         if not isinstance(sniper, dict):
@@ -1555,6 +1557,21 @@ _OPERATION_ADVICE_KEYWORD_LABELS = (
 )
 # Free-form labels longer than this fall back to the decision signal mapping.
 _OPERATION_ADVICE_MAX_LABEL_CHARS = 12
+
+
+# Plain-language dashboard block for non-professional readers (busy-reader summary)
+_PLAIN_LANGUAGE_KEYS = ("action_now", "change_condition", "key_risk")
+
+
+def _sanitize_plain_language(value: Any) -> Dict[str, str]:
+    """Keep only the known plain-language keys with non-empty string values."""
+    sanitized: Dict[str, str] = {}
+    if isinstance(value, dict):
+        for key in _PLAIN_LANGUAGE_KEYS:
+            text = value.get(key)
+            if isinstance(text, str) and text.strip():
+                sanitized[key] = _truncate_text(text.strip(), 60)
+    return sanitized
 
 
 def _normalize_operation_advice_value(value: Any, signal: str) -> str:

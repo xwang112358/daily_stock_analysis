@@ -125,6 +125,19 @@ report language). Never put sentences, price levels, or split advice in
 current holders); concrete price levels belong to
 ``dashboard.battle_plan.sniper_points``.
 
+``dashboard.core_conclusion`` must also include ``plain_language`` — three
+short sentences written for a busy reader with NO finance background:
+  "plain_language": {{
+    "action_now": "<what to do right now, one sentence, ≤50 chars>",
+    "change_condition": "<the concrete price/event that changes the action, with numbers, ≤50 chars>",
+    "key_risk": "<the single biggest risk in everyday words, ≤40 chars>"
+  }}
+Plain-language rules for these three fields ONLY: no technical jargon — do
+not use terms like 均线/MA/MACD/RSI/KDJ/背离/背驰/筹码/缠论/波浪/PB/PE/量比.
+Translate the idea instead (e.g. "MACD金叉" → "下跌力量在减弱",
+"跌破MA20" → "跌破 26.8 元"). Keep concrete numbers. Everywhere else in the
+JSON the professional wording stays unchanged.
+
 The nested ``dashboard`` object must include ``phase_decision`` with these
 keys: ``phase_context``, ``action_window``, ``immediate_action``,
 ``watch_conditions``, ``next_check_time``, ``confidence_reason``,
