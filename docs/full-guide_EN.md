@@ -369,6 +369,7 @@ For the notification baseline, diagnostics, and deployment notes, see [Notificat
 | `STOCK_LIST` | Watchlist codes (comma-separated) | - |
 | `MAX_WORKERS` | Concurrent threads | `3` |
 | `MARKET_REVIEW_ENABLED` | Enable market review | `true` |
+| `MARKET_REVIEW_NOTIFY_ENABLED` | Push the market-review message in the daily analysis flow; set to `false` to push stock messages only — the review is still generated (stock-analysis context, report files, and history are unaffected), and explicit triggers (`--market-review`, bot commands, API) are not restricted | `true` |
 | `DAILY_MARKET_CONTEXT_ENABLED` | Inject the daily market context into stock-analysis prompts and soften aggressive buy advice in high-risk/risk-off markets; enabled by default, and market review can still run when this is set to `false` | `true` |
 | `MARKET_REVIEW_REGION` | Market review region: cn (A-shares), hk (HK stocks), us (US stocks), jp (JP stocks), kr (KR stocks), both (all five markets) | `cn` |
 | `MARKET_REVIEW_COLOR_SCHEME` | Index change color style in market reviews: `green_up` = green gains/red losses (default), `red_up` = red gains/green losses | `green_up` |

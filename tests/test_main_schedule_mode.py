@@ -1820,6 +1820,54 @@ class MainScheduleModeTestCase(unittest.TestCase):
         self.assertFalse(get_context_kwargs["allow_generate"])
         self.assertFalse(get_context_kwargs["persist_market_review_history"])
 
+    def _run_full_analysis_capturing_review_send(self, *, notify_enabled, merge_notification=False):
+        """Run run_full_analysis with mocks and capture market-review kwargs."""
+        config = self._make_config(
+            trading_day_check_enabled=False,
+            market_review_enabled=True,
+            market_review_notify_enabled=notify_enabled,
+            daily_market_context_enabled=False,
+            single_stock_notify=False,
+            merge_email_notification=merge_notification,
+            analysis_delay=0,
+            market_review_region="cn",
+        )
+        args = self._make_args(force_run=True)
+        pipeline = MagicMock()
+        pipeline.run.return_value = []
+        pipeline.notifier.is_available.return_value = True
+        captured = {}
+
+        def fake_locked_review(config_arg, review_func, **kwargs):
+            captured.update(kwargs)
+            return "大盘复盘正文"
+
+        with patch("main._refresh_stock_index_cache_for_analysis"), \
+             patch("src.core.pipeline.StockAnalysisPipeline", return_value=pipeline), \
+             patch("main._run_market_review_with_shared_lock", side_effect=fake_locked_review), \
+             patch("src.feishu_doc.FeishuDocManager") as doc_manager_cls:
+            doc_manager_cls.return_value.is_configured.return_value = False
+            result = main.run_full_analysis(config, args, ["600519"], raise_errors=True)
+
+        self.assertTrue(result)
+        return captured, pipeline
+
+    def test_run_full_analysis_market_review_notify_disabled_suppresses_push(self) -> None:
+        captured, _ = self._run_full_analysis_capturing_review_send(notify_enabled=False)
+        self.assertFalse(captured["send_notification"])
+
+    def test_run_full_analysis_market_review_notify_enabled_keeps_push(self) -> None:
+        captured, _ = self._run_full_analysis_capturing_review_send(notify_enabled=True)
+        self.assertTrue(captured["send_notification"])
+
+    def test_run_full_analysis_merge_push_excludes_market_report_when_notify_disabled(self) -> None:
+        _, pipeline = self._run_full_analysis_capturing_review_send(
+            notify_enabled=False,
+            merge_notification=True,
+        )
+        # 合并推送内容不得包含大盘复盘；本例个股结果为空，因此不应发出任何合并消息
+        pipeline.notifier.send.assert_not_called()
+
     def test_config_enabled_schedule_marks_market_review_source_as_schedule(self) -> None:
         args = self._make_args(schedule=False)
         target_date = date(2026, 3, 26)

@@ -3388,6 +3388,32 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         ],
         "warning_codes": [],
     },
+    "MARKET_REVIEW_NOTIFY_ENABLED": {
+        "title": "Market Review Notify Enabled",
+        "description": "Send the market-review report as a notification in the daily analysis flow. When disabled, the review is still generated for stock-analysis context, report files, and history, but no market-review message is pushed.",
+        "category": "system",
+        "data_type": "boolean",
+        "ui_control": "switch",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "true",
+        "options": [],
+        "validation": {},
+        "display_order": 46,
+        "help_key": "settings.system.market_review",
+        "examples": [
+            "MARKET_REVIEW_NOTIFY_ENABLED=true",
+            "MARKET_REVIEW_NOTIFY_ENABLED=false",
+        ],
+        "docs": [
+            {
+                "label": "完整指南：环境变量完整列表",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/full-guide.md#环境变量完整列表",
+            },
+        ],
+        "warning_codes": [],
+    },
     "DAILY_MARKET_CONTEXT_ENABLED": {
         "title": "Daily Market Context Enabled",
         "description": "Inject daily market context into stock-analysis prompts and apply conservative decision guardrails.",

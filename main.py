@@ -699,6 +699,9 @@ def run_full_analysis(
             and not config.single_stock_notify
         )
 
+        # 大盘复盘推送开关：关闭后每日流程仍生成大盘复盘（个股上下文/报告文件/历史记录），仅不推送通知
+        market_review_notify_enabled = getattr(config, 'market_review_notify_enabled', True)
+
         # 创建调度器
         save_context_snapshot = None
         if getattr(args, 'no_context_snapshot', False):
@@ -829,6 +832,7 @@ def run_full_analysis(
                     market_context_generated_during_stock
                     and not merge_notification
                     and not args.no_notify
+                    and market_review_notify_enabled
                     and pipeline.notifier.is_available()
                 ):
                     if pipeline.notifier.send(
@@ -852,7 +856,7 @@ def run_full_analysis(
                     notifier=pipeline.notifier,
                     analyzer=pipeline.analyzer,
                     search_service=pipeline.search_service,
-                    send_notification=not args.no_notify,
+                    send_notification=not args.no_notify and market_review_notify_enabled,
                     merge_notification=merge_notification,
                     override_region=market_review_region,
                     query_id=query_id,
@@ -889,7 +893,7 @@ def run_full_analysis(
         # Issue #190: 合并推送（个股+大盘复盘）
         if merge_notification and (results or market_report) and not args.no_notify:
             parts = []
-            if market_report:
+            if market_report and market_review_notify_enabled:
                 parts.append(f"# 📈 大盘复盘\n\n{market_report}")
             if results:
                 dashboard_content = pipeline.notifier.generate_aggregate_report(
