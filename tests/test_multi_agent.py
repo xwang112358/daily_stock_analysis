@@ -1893,6 +1893,7 @@ class TestAgentMemory(unittest.TestCase):
         from src.agent.memory import AgentMemory
 
         record = SimpleNamespace(
+            id=101,
             created_at=SimpleNamespace(date=lambda: SimpleNamespace(isoformat=lambda: "2026-03-01")),
             raw_result=json.dumps({"decision_type": "buy", "current_price": 1880.0}),
             sentiment_score=72,
@@ -1901,13 +1902,72 @@ class TestAgentMemory(unittest.TestCase):
         db = MagicMock()
         db.get_analysis_history.return_value = [record]
 
-        with patch("src.storage.get_db", return_value=db):
+        with patch("src.storage.get_db", return_value=db), \
+             patch.object(AgentMemory, "_load_backtest_rows", return_value={}):
             mem = AgentMemory(enabled=True)
             history = mem.get_stock_history("600519", limit=1)
 
         self.assertEqual(len(history), 1)
         self.assertEqual(history[0].signal, "buy")
         self.assertEqual(history[0].price_at_analysis, 1880.0)
+        self.assertIsNone(history[0].was_correct)
+
+    def test_get_stock_history_joins_completed_backtest_outcomes(self):
+        from src.agent.memory import AgentMemory
+
+        record = SimpleNamespace(
+            id=101,
+            created_at=SimpleNamespace(date=lambda: SimpleNamespace(isoformat=lambda: "2026-03-01")),
+            raw_result=json.dumps({"decision_type": "hold", "current_price": 27.5}),
+            sentiment_score=48,
+            operation_advice="持有",
+        )
+        backtest_row = SimpleNamespace(
+            analysis_history_id=101,
+            eval_status="completed",
+            direction_correct=False,
+            stock_return_pct=-8.4,
+            eval_window_days=10,
+            operation_advice="持有",
+        )
+        db = MagicMock()
+        db.get_analysis_history.return_value = [record]
+
+        with patch("src.storage.get_db", return_value=db), \
+             patch.object(AgentMemory, "_load_backtest_rows", return_value={101: backtest_row}):
+            mem = AgentMemory(enabled=True)
+            history = mem.get_stock_history("300209", limit=1)
+
+        self.assertEqual(len(history), 1)
+        self.assertIs(history[0].was_correct, False)
+        self.assertAlmostEqual(history[0].outcome_pct, -8.4)
+        self.assertEqual(history[0].outcome_window_days, 10)
+        self.assertEqual(history[0].advice, "持有")
+
+    def test_get_backtest_feedback_disabled_returns_empty(self):
+        from src.agent.memory import AgentMemory
+        mem = AgentMemory(enabled=False)
+        self.assertEqual(mem.get_backtest_feedback("600519"), {})
+
+    def test_get_backtest_feedback_filters_small_samples(self):
+        from src.agent.memory import AgentMemory
+
+        service = MagicMock()
+        service.get_global_summary.return_value = {
+            "completed_count": 42,
+            "direction_accuracy": 0.52,
+            "win_rate": 0.48,
+            "stop_loss_trigger_rate": 0.9,
+        }
+        service.get_stock_summary.return_value = {"completed_count": 2}
+
+        with patch("src.services.backtest_service.BacktestService", return_value=service):
+            mem = AgentMemory(enabled=True)
+            feedback = mem.get_backtest_feedback("600519", min_completed=5)
+
+        self.assertIn("overall", feedback)
+        self.assertNotIn("stock", feedback)
+        self.assertEqual(feedback["overall"]["completed_count"], 42)
 
 
 class TestBaseAgentMemoryIntegration(unittest.TestCase):
@@ -1933,17 +1993,19 @@ class TestBaseAgentMemoryIntegration(unittest.TestCase):
             return DummyAgent(tool_registry=MagicMock(), llm_adapter=MagicMock())
 
     def test_memory_context_is_injected(self):
-        entry = SimpleNamespace(
+        from src.agent.memory import AnalysisMemoryEntry
+
+        entry = AnalysisMemoryEntry(
             date="2026-03-01",
             signal="buy",
             sentiment_score=72,
             price_at_analysis=1880.0,
             outcome_5d=0.03,
-            outcome_20d=None,
             was_correct=True,
         )
         memory = MagicMock(enabled=True)
         memory.get_stock_history.return_value = [entry]
+        memory.get_backtest_feedback.return_value = {}
         agent = self._make_agent(memory)
 
         ctx = AgentContext(query="test", stock_code="600519")
@@ -1951,6 +2013,48 @@ class TestBaseAgentMemoryIntegration(unittest.TestCase):
 
         self.assertIn("Memory: recent analysis history", injected)
         self.assertIn("signal=buy", injected)
+
+    def test_backtest_feedback_is_injected(self):
+        from src.agent.memory import AnalysisMemoryEntry
+
+        entry = AnalysisMemoryEntry(
+            date="2026-07-15",
+            signal="hold",
+            sentiment_score=45,
+            price_at_analysis=27.5,
+            was_correct=False,
+            outcome_pct=-8.4,
+            outcome_window_days=10,
+            advice="持有",
+        )
+        memory = MagicMock(enabled=True)
+        memory.get_stock_history.return_value = [entry]
+        memory.get_backtest_feedback.return_value = {
+            "overall": {
+                "completed_count": 42,
+                "direction_accuracy": 0.52,
+                "win_rate": 0.48,
+                "stop_loss_trigger_rate": 0.9,
+                "take_profit_trigger_rate": 0.08,
+            },
+            "stock": {
+                "completed_count": 15,
+                "direction_accuracy": 0.40,
+                "win_rate": 0.33,
+            },
+        }
+        agent = self._make_agent(memory)
+
+        ctx = AgentContext(query="test", stock_code="300209")
+        injected = agent._inject_cached_data(ctx)
+
+        self.assertIn("[Memory: backtest feedback]", injected)
+        self.assertIn("all stocks: n=42", injected)
+        self.assertIn("this stock: n=15", injected)
+        self.assertIn("direction_accuracy=40%", injected)
+        self.assertIn("stop_loss_trigger_rate=0.9", injected)
+        self.assertIn("outcome_10d=-8.4%", injected)
+        self.assertIn("advice=持有", injected)
 
     def test_market_phase_meta_is_not_injected_as_prefetched_data(self):
         memory = MagicMock(enabled=False)
@@ -1972,6 +2076,7 @@ class TestBaseAgentMemoryIntegration(unittest.TestCase):
     def test_memory_calibration_updates_confidence(self):
         memory = MagicMock(enabled=True)
         memory.get_stock_history.return_value = []
+        memory.get_backtest_feedback.return_value = {}
         memory.get_calibration.return_value = SimpleNamespace(
             calibrated=True,
             calibration_factor=0.5,
@@ -2013,6 +2118,7 @@ class TestBaseAgentMemoryIntegration(unittest.TestCase):
 
         memory = MagicMock(enabled=True)
         memory.get_stock_history.return_value = []
+        memory.get_backtest_feedback.return_value = {}
         memory.get_calibration.return_value = SimpleNamespace(
             calibrated=True,
             calibration_factor=0.5,
@@ -2375,6 +2481,76 @@ class TestAgentResearchEndpoint(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(response.success)
         self.assertIn("timed out", response.error)
+
+
+# ============================================================
+# operation_advice normalization & sentence truncation
+# ============================================================
+
+class TestOperationAdviceNormalization(unittest.TestCase):
+    """operation_advice must stay an enum-like short label (回测聚合契约)."""
+
+    def test_canonical_labels_pass_through(self):
+        from src.agent.orchestrator import _normalize_operation_advice_value
+        for label in ("买入", "加仓", "持有", "观望", "减仓", "卖出", "清仓", "减仓/卖出"):
+            self.assertEqual(_normalize_operation_advice_value(label, "hold"), label)
+
+    def test_short_free_form_label_maps_by_keyword(self):
+        from src.agent.orchestrator import _normalize_operation_advice_value
+        self.assertEqual(_normalize_operation_advice_value("持有/轻仓低吸", "hold"), "持有")
+        self.assertEqual(_normalize_operation_advice_value("减仓或离场观望", "sell"), "减仓")
+        self.assertEqual(_normalize_operation_advice_value("持有观察", "hold"), "持有")
+
+    def test_long_free_text_falls_back_to_signal(self):
+        from src.agent.orchestrator import _normalize_operation_advice_value
+        long_advice = (
+            "空仓者：坚决不抄底，观望等待。持仓者：利用盘中任何反弹机会逢高减仓，"
+            "若继续下跌需严格执行止损纪律，避免深度套牢。"
+        )
+        self.assertEqual(_normalize_operation_advice_value(long_advice, "sell"), "减仓/卖出")
+        self.assertEqual(_normalize_operation_advice_value(long_advice, "hold"), "观望")
+
+    def test_dict_and_empty_fall_back_to_signal(self):
+        from src.agent.orchestrator import _normalize_operation_advice_value
+        self.assertEqual(
+            _normalize_operation_advice_value({"no_position": "观望", "has_position": "减仓"}, "sell"),
+            "减仓/卖出",
+        )
+        self.assertEqual(_normalize_operation_advice_value("", "buy"), "买入")
+        self.assertEqual(_normalize_operation_advice_value(None, "hold"), "观望")
+
+    def test_risk_override_suffix_survives_downstream_adjust(self):
+        from src.agent.orchestrator import _adjust_operation_advice
+        self.assertEqual(
+            _adjust_operation_advice("持有", "sell"),
+            "减仓/卖出（原建议已被风控下调）",
+        )
+
+
+class TestSentenceAwareTruncation(unittest.TestCase):
+    def test_short_text_unchanged(self):
+        from src.agent.orchestrator import _truncate_text_at_sentence
+        self.assertEqual(_truncate_text_at_sentence("短句。", 50), "短句。")
+
+    def test_truncates_at_sentence_boundary(self):
+        from src.agent.orchestrator import _truncate_text_at_sentence
+        sentence = "这是一个足够长的句子用来测试截断行为正常工作。"
+        result = _truncate_text_at_sentence(sentence * 5, 40)
+        self.assertEqual(result, sentence)
+
+    def test_early_boundary_falls_back_to_hard_cut(self):
+        from src.agent.orchestrator import _truncate_text_at_sentence
+        text = "短句。" + "无标点" * 100
+        result = _truncate_text_at_sentence(text, 40)
+        self.assertTrue(result.endswith("…"))
+        self.assertLessEqual(len(result), 40)
+
+    def test_falls_back_to_hard_cut_without_boundary(self):
+        from src.agent.orchestrator import _truncate_text_at_sentence
+        text = "无标点" * 100
+        result = _truncate_text_at_sentence(text, 40)
+        self.assertTrue(result.endswith("…"))
+        self.assertLessEqual(len(result), 40)
 
 
 if __name__ == '__main__':

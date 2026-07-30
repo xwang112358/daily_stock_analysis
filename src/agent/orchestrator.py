@@ -883,7 +883,7 @@ class AgentOrchestrator:
         )
         if not analysis_summary:
             analysis_summary = f"多 Agent 未生成完整仪表盘，当前按{_signal_to_operation(decision_type)}处理。"
-        analysis_summary = _truncate_text(analysis_summary, 220)
+        analysis_summary = _truncate_text_at_sentence(analysis_summary, 300)
 
         trend_prediction = _first_non_empty_text(
             payload.get("trend_prediction"),
@@ -975,7 +975,7 @@ class AgentOrchestrator:
             intelligence["latest_news"] = latest_news
 
         if not core.get("one_sentence"):
-            core["one_sentence"] = _truncate_text(analysis_summary, 60)
+            core["one_sentence"] = _truncate_text_at_sentence(analysis_summary, 300)
         if not core.get("time_sensitivity"):
             core["time_sensitivity"] = "本周内"
         if not core.get("signal_type"):
@@ -1532,9 +1532,47 @@ def _default_position_size(signal: str) -> str:
     return mapping.get(signal, "控制仓位")
 
 
+# Canonical short action labels allowed in the dashboard summary field.
+# Longer split advice belongs to position_advice.no_position / has_position.
+_CANONICAL_OPERATION_ADVICE_LABELS = frozenset({
+    "买入", "加仓", "持有", "观望", "减仓", "卖出", "清仓", "减仓/卖出",
+    "buy", "add", "hold", "wait", "watch", "reduce", "sell",
+})
+# Ordered keyword → canonical label mapping for short free-form labels.
+# Bearish first (risk-priority), then 持有 before bullish so mixed labels like
+# "持有/轻仓低吸" resolve to the conservative 持有 rather than 买入.
+_OPERATION_ADVICE_KEYWORD_LABELS = (
+    ("清仓", "清仓"),
+    ("减仓", "减仓"),
+    ("卖出", "卖出"),
+    ("持有", "持有"),
+    ("加仓", "加仓"),
+    ("买入", "买入"),
+    ("建仓", "买入"),
+    ("低吸", "买入"),
+    ("观望", "观望"),
+    ("等待", "观望"),
+)
+# Free-form labels longer than this fall back to the decision signal mapping.
+_OPERATION_ADVICE_MAX_LABEL_CHARS = 12
+
+
 def _normalize_operation_advice_value(value: Any, signal: str) -> str:
-    if isinstance(value, str) and value.strip():
-        return value.strip()
+    """Coerce operation_advice into a short canonical action label.
+
+    The dashboard summary line and backtest aggregation both rely on this
+    field being an enum-like label; multi-sentence advice is authoritative in
+    position_advice and must not leak here (Issue: 自由文本污染回测统计).
+    """
+    if not isinstance(value, str) or not value.strip():
+        return _signal_to_operation(signal)
+    text = value.strip()
+    if text in _CANONICAL_OPERATION_ADVICE_LABELS or text.lower() in _CANONICAL_OPERATION_ADVICE_LABELS:
+        return text
+    if len(text) <= _OPERATION_ADVICE_MAX_LABEL_CHARS:
+        for keyword, label in _OPERATION_ADVICE_KEYWORD_LABELS:
+            if keyword in text:
+                return label
     return _signal_to_operation(signal)
 
 
@@ -1601,6 +1639,25 @@ def _truncate_text(text: Any, limit: int) -> str:
     if len(value) <= limit:
         return value
     return value[: max(0, limit - 1)].rstrip() + "…"
+
+
+_SENTENCE_END_CHARS = "。！？；.!?;"
+
+
+def _truncate_text_at_sentence(text: Any, limit: int) -> str:
+    """Truncate at the last sentence boundary within ``limit`` when possible.
+
+    Falls back to the hard "…" cut only when no boundary sits in the second
+    half of the window, so summary-style fields stop ending mid-sentence.
+    """
+    value = str(text or "").strip()
+    if len(value) <= limit:
+        return value
+    window = value[:limit]
+    boundary = max(window.rfind(ch) for ch in _SENTENCE_END_CHARS)
+    if boundary >= limit // 2:
+        return window[: boundary + 1]
+    return _truncate_text(value, limit)
 
 
 def _extract_latest_news_title(intelligence: Dict[str, Any]) -> str:

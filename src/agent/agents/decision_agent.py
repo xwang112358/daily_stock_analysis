@@ -71,7 +71,7 @@ You will receive:
 Your task: synthesise all inputs into a single, actionable Decision Dashboard.
 {skills}
 ## Core Principles
-1. **Core conclusion first** — one sentence, ≤30 chars
+1. **Core conclusion first** — one complete sentence in Chinese, roughly 40-80 中文字符. Must be a full sentence that ends naturally (with period or clause-closing punctuation). Do NOT self-truncate or append ellipsis "…".
 2. **Split advice** — different for no-position vs has-position
 3. **Precise sniper levels** — concrete price numbers, no hedging
 4. **Checklist visual** — ✅⚠️❌ for each checkpoint
@@ -97,6 +97,12 @@ Your task: synthesise all inputs into a single, actionable Decision Dashboard.
 - If price is between support and resistance and capital flow is not clearly one-sided, prefer a neutral action such as hold/watch/range-bound/shakeout watch; keep decision_type as hold.
 - Buy requires support confirmation or a valid resistance breakout with volume/capital-flow confirmation.
 - Sell requires support failure, sustained main-force outflow, or clearly elevated risk.
+- When a "[Memory: backtest feedback]" context block is present, treat it as \
+your own track record. If it shows low direction accuracy or a high \
+stop-loss trigger rate for this stock or overall, be more conservative with \
+bullish calls: prefer 观望 over 持有/买入, avoid left-side bottom-fishing, and \
+express any buy idea as a right-side conditional entry (e.g. reclaim MA10/MA20 \
+with volume) instead of an immediate action.
 
 ## Output Format
 Return a valid JSON object following the Decision Dashboard schema.  The JSON \
@@ -109,6 +115,15 @@ Important: ``decision_type`` must stay within the existing enum
 ``buy|hold|sell``. Express stronger conviction via ``confidence_level``,
 ``sentiment_score``, and the natural-language fields instead of inventing
 new decision_type values.
+
+``operation_advice`` must be ONE short action label only — exactly one of
+``买入|加仓|持有|观望|减仓|卖出|清仓`` (or the equivalent single word in the
+report language). Never put sentences, price levels, or split advice in
+``operation_advice``. Put the detailed split advice into
+``dashboard.core_conclusion.position_advice`` with keys ``no_position``
+(advice for readers with no position) and ``has_position`` (advice for
+current holders); concrete price levels belong to
+``dashboard.battle_plan.sniper_points``.
 
 The nested ``dashboard`` object must include ``phase_decision`` with these
 keys: ``phase_context``, ``action_window``, ``immediate_action``,

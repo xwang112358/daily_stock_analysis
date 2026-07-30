@@ -111,7 +111,13 @@ class BacktestEngine:
 
     @classmethod
     def infer_direction_expected(cls, operation_advice: Optional[str]) -> str:
-        """Infer expected direction: up/down/not_down/flat."""
+        """Infer expected direction: up/down/not_down/not_up/flat.
+
+        观望/等待 means "stay in cash, no upside opportunity"; it is judged as
+        ``not_up`` (correct unless the stock rallies beyond the neutral band),
+        not as a literal flat-price forecast — high-volatility stocks made the
+        old ``flat`` reading fail on almost every swing.
+        """
         text = cls._normalize_text(operation_advice)
         if cls._matches_intent(text, cls._BEARISH_KEYWORDS):
             return "down"
@@ -122,13 +128,13 @@ class BacktestEngine:
             if (bullish_pos is None or wait_pos < bullish_pos) and (
                 hold_pos is None or wait_pos < hold_pos
             ):
-                return "flat"
+                return "not_up"
         if cls._matches_intent(text, cls._BULLISH_KEYWORDS):
             return "up"
         if cls._matches_intent(text, cls._HOLD_KEYWORDS):
             return "not_down"
         if cls._matches_intent(text, cls._WAIT_KEYWORDS):
-            return "flat"
+            return "not_up"
         return "flat"
 
     @classmethod
@@ -633,6 +639,11 @@ class BacktestEngine:
             if r <= -band:
                 return "loss", False
             return "neutral", None
+
+        if direction_expected == "not_up":
+            if r <= band:
+                return "win", True
+            return "loss", False
 
         # flat
         if abs(r) <= band:

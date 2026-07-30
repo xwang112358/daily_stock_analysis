@@ -59,9 +59,9 @@ class BacktestEngineTestCase(unittest.TestCase):
         self.assertEqual(res["simulated_return_pct"], 0.0)
         self.assertEqual(res["first_hit"], "not_applicable")
 
-    def test_wait_maps_to_cash_and_flat_direction(self):
+    def test_wait_maps_to_cash_and_not_up_direction(self):
         cfg = EvaluationConfig(eval_window_days=3, neutral_band_pct=2.0)
-        # Stock drops ~5%: AI said wait (neutral), stock moved significantly → loss
+        # Stock drops ~5%: AI said wait (stay in cash) — no upside was missed → win
         bars = self._bars(date(2024, 1, 1), [98, 96, 95], highs=[99, 97, 96], lows=[97, 95, 94])
         res = BacktestEngine.evaluate_single(
             operation_advice="观望",
@@ -73,7 +73,24 @@ class BacktestEngineTestCase(unittest.TestCase):
             config=cfg,
         )
         self.assertEqual(res["position_recommendation"], "cash")
-        self.assertEqual(res["direction_expected"], "flat")
+        self.assertEqual(res["direction_expected"], "not_up")
+        self.assertEqual(res["outcome"], "win")
+
+    def test_wait_is_loss_when_stock_rallies_beyond_band(self):
+        cfg = EvaluationConfig(eval_window_days=3, neutral_band_pct=2.0)
+        # Stock rallies ~6%: AI said wait but upside was missed → loss
+        bars = self._bars(date(2024, 1, 1), [102, 104, 106], highs=[103, 105, 107], lows=[101, 103, 105])
+        res = BacktestEngine.evaluate_single(
+            operation_advice="观望",
+            analysis_date=date(2024, 1, 1),
+            start_price=100,
+            forward_bars=bars,
+            stop_loss=None,
+            take_profit=None,
+            config=cfg,
+        )
+        self.assertEqual(res["position_recommendation"], "cash")
+        self.assertEqual(res["direction_expected"], "not_up")
         self.assertEqual(res["outcome"], "loss")
 
     def test_bearish_like_phrases_match_keyword_substring(self):
@@ -431,7 +448,7 @@ class BacktestEngineTestCase(unittest.TestCase):
         )
         self.assertEqual(
             BacktestEngine.infer_direction_expected("先观望再买入"),
-            "flat",
+            "not_up",
         )
         self.assertEqual(
             BacktestEngine.infer_position_recommendation("观望后买入"),
@@ -439,7 +456,7 @@ class BacktestEngineTestCase(unittest.TestCase):
         )
         self.assertEqual(
             BacktestEngine.infer_direction_expected("观望后买入"),
-            "flat",
+            "not_up",
         )
 
 

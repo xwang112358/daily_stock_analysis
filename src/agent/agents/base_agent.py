@@ -243,30 +243,57 @@ class BaseAgent(ABC):
         return filtered
 
     def _build_memory_context(self, ctx: AgentContext) -> str:
-        """Summarise recent analysis history for prompt injection."""
+        """Summarise recent analysis history and backtest feedback for prompt injection."""
         if not self.memory.enabled or not ctx.stock_code:
             return ""
 
+        lines: List[str] = []
         entries = self.memory.get_stock_history(ctx.stock_code, limit=3)
-        if not entries:
-            return ""
+        if entries:
+            lines.append("[Memory: recent analysis history]")
+            for entry in entries:
+                parts = [
+                    entry.date or "unknown_date",
+                    f"signal={entry.signal or 'unknown'}",
+                    f"sentiment={entry.sentiment_score}",
+                ]
+                if entry.price_at_analysis:
+                    parts.append(f"price={entry.price_at_analysis}")
+                if entry.advice:
+                    parts.append(f"advice={entry.advice}")
+                if entry.outcome_pct is not None:
+                    window = entry.outcome_window_days or "?"
+                    parts.append(f"outcome_{window}d={entry.outcome_pct:+.1f}%")
+                if entry.outcome_5d is not None:
+                    parts.append(f"outcome_5d={entry.outcome_5d}")
+                if entry.outcome_20d is not None:
+                    parts.append(f"outcome_20d={entry.outcome_20d}")
+                if entry.was_correct is not None:
+                    parts.append(f"was_correct={entry.was_correct}")
+                lines.append("- " + ", ".join(parts))
 
-        lines = ["[Memory: recent analysis history]"]
-        for entry in entries:
-            parts = [
-                entry.date or "unknown_date",
-                f"signal={entry.signal or 'unknown'}",
-                f"sentiment={entry.sentiment_score}",
-            ]
-            if entry.price_at_analysis:
-                parts.append(f"price={entry.price_at_analysis}")
-            if entry.outcome_5d is not None:
-                parts.append(f"outcome_5d={entry.outcome_5d}")
-            if entry.outcome_20d is not None:
-                parts.append(f"outcome_20d={entry.outcome_20d}")
-            if entry.was_correct is not None:
-                parts.append(f"was_correct={entry.was_correct}")
-            lines.append("- " + ", ".join(parts))
+        feedback = self.memory.get_backtest_feedback(ctx.stock_code)
+        if feedback:
+            lines.append("[Memory: backtest feedback]")
+            for scope_key, label in (("overall", "all stocks"), ("stock", "this stock")):
+                summary = feedback.get(scope_key)
+                if not summary:
+                    continue
+                parts = [
+                    f"{label}: n={summary.get('completed_count')}",
+                    f"direction_accuracy={summary.get('direction_accuracy', 0.5):.0%}",
+                    f"win_rate={summary.get('win_rate', 0.5):.0%}",
+                ]
+                stop_rate = summary.get("stop_loss_trigger_rate")
+                if stop_rate is not None:
+                    parts.append(f"stop_loss_trigger_rate={stop_rate}")
+                take_rate = summary.get("take_profit_trigger_rate")
+                if take_rate is not None:
+                    parts.append(f"take_profit_trigger_rate={take_rate}")
+                lines.append("- " + ", ".join(parts))
+
+        if not lines:
+            return ""
         lines.append("Use this memory as context only; do not copy it verbatim into the final answer.")
         return "\n".join(lines)
 

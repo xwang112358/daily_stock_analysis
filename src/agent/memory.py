@@ -57,6 +57,10 @@ class AnalysisMemoryEntry:
     outcome_5d: Optional[float] = None  # % change after 5 days
     outcome_20d: Optional[float] = None  # % change after 20 days
     was_correct: Optional[bool] = None
+    # Backtest join (populated when a completed backtest row exists)
+    outcome_pct: Optional[float] = None  # % change over the backtest eval window
+    outcome_window_days: Optional[int] = None
+    advice: str = ""
 
 
 class AgentMemory:
@@ -107,6 +111,7 @@ class AgentMemory:
             from src.storage import get_db
             db = get_db()
             records = db.get_analysis_history(code=stock_code, limit=limit)
+            backtest_by_history_id = self._load_backtest_rows(stock_code)
             entries = []
             for r in records:
                 raw_result: Dict[str, Any] = {}
@@ -125,18 +130,80 @@ class AgentMemory:
                 if price_at_analysis is None:
                     price_at_analysis = 0.0
 
-                entries.append(AnalysisMemoryEntry(
+                entry = AnalysisMemoryEntry(
                     stock_code=stock_code,
                     date=(r.created_at.date().isoformat() if getattr(r, "created_at", None) else ""),
                     signal=signal,
                     sentiment_score=getattr(r, "sentiment_score", 50) or 50,
                     price_at_analysis=float(price_at_analysis or 0.0),
                     was_correct=None,
-                ))
+                )
+                backtest_row = backtest_by_history_id.get(getattr(r, "id", None))
+                if backtest_row is not None:
+                    entry.was_correct = backtest_row.direction_correct
+                    entry.outcome_pct = backtest_row.stock_return_pct
+                    entry.outcome_window_days = backtest_row.eval_window_days
+                    entry.advice = backtest_row.operation_advice or ""
+                entries.append(entry)
             return entries
         except Exception as exc:
             logger.debug("[AgentMemory] get_stock_history failed: %s", exc)
             return []
+
+    def _load_backtest_rows(self, stock_code: str) -> Dict[Any, Any]:
+        """Map analysis_history_id -> completed backtest row for one stock (fail-open)."""
+        try:
+            from src.config import get_config
+            from src.services.backtest_service import BacktestService
+
+            engine_version = str(getattr(get_config(), "backtest_engine_version", "v1"))
+            rows = BacktestService().repo.list_results(
+                code=stock_code,
+                engine_version=engine_version,
+                limit=_ROLLING_WINDOW,
+            )
+            return {
+                row.analysis_history_id: row
+                for row in rows
+                if getattr(row, "eval_status", "") == "completed"
+            }
+        except Exception as exc:
+            logger.debug("[AgentMemory] backtest join failed: %s", exc)
+            return {}
+
+    # -----------------------------------------------------------------
+    # Backtest feedback snapshot
+    # -----------------------------------------------------------------
+
+    def get_backtest_feedback(
+        self,
+        stock_code: Optional[str] = None,
+        min_completed: int = 5,
+    ) -> Dict[str, Any]:
+        """Return normalized overall + per-stock backtest summaries for prompt injection.
+
+        Only summaries with at least ``min_completed`` completed evaluations are
+        included, so the model never sees noise from tiny samples. Returns an
+        empty dict when memory is disabled or nothing qualifies (fail-open).
+        """
+        if not self.enabled:
+            return {}
+
+        feedback: Dict[str, Any] = {}
+        try:
+            from src.services.backtest_service import BacktestService
+            service = BacktestService()
+
+            overall = service.get_global_summary()
+            if overall and (overall.get("completed_count") or 0) >= min_completed:
+                feedback["overall"] = overall
+            if stock_code:
+                stock = service.get_stock_summary(stock_code)
+                if stock and (stock.get("completed_count") or 0) >= min_completed:
+                    feedback["stock"] = stock
+        except Exception as exc:
+            logger.debug("[AgentMemory] get_backtest_feedback failed: %s", exc)
+        return feedback
 
     # -----------------------------------------------------------------
     # Confidence calibration

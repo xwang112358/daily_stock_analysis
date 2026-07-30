@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [文档] #1743 Phase 4 同步本地 CLI backend 隐私/部署边界：local CLI 不是离线模型，Docker/CI/远端需自行安装登录，DSA 不读取 Claude/OpenCode credential 文件。
 - [新功能] 台股报告接入三大法人：tw 个股分析报告的 institution 区块改为展示 TWSE T86 / TPEx 三大法人原始买卖超净额（外资/投信/自营/合计，单位:股）；tw-only、严格 additive（A股/港股/美股/日韩股 offshore 流程字节不变）、fail-open（取不到数据维持 not_supported，绝不中断分析）；不接 Web、不派生 capital_flow_signal、不改评分权重或 schema。
 - [新功能] 新增 `MARKET_REVIEW_NOTIFY_ENABLED`（默认 `true`）：每日分析流程可单独关闭大盘复盘推送，仅推送个股消息；关闭后大盘复盘仍会生成（个股分析上下文/报告文件/历史记录不受影响），显式触发（`--market-review`、Bot 命令、API）不受该开关限制。
+- [改进] Agent 决策仪表盘 `operation_advice` 归一化为短枚举标签（买入/加仓/持有/观望/减仓/卖出/清仓）：DecisionAgent prompt 明确约束，orchestrator 对自由文本做关键词归一并以 `decision_type` 兜底；分持仓建议保留在 `position_advice`，避免整段建议污染报告摘要与回测按建议聚合。
+- [改进] AgentMemory 补全回测闭环：`get_stock_history` 关联已完成回测结果（was_correct/窗口收益），新增 `get_backtest_feedback` 注入个股与全局回测摘要（方向准确率/胜率/止损触发率，样本≥5 才注入），DecisionAgent 增加"历史多头准确率低时收敛为观望并要求右侧确认"的指引；均在 `AGENT_MEMORY_ENABLED=true` 时生效，失败静默降级不影响分析。
+- [改进] 回测引擎 v2 口径：观望/等待类建议改按 `not_up` 评估（评估窗口内未错过超过中性带的上涨即算对），替代旧的 `flat` 横盘口径——高波动股票下旧口径几乎必判错；`BACKTEST_ENGINE_VERSION` 建议随语义升级设为 `v2` 以区分新旧结果。
+- [修复] Agent 仪表盘 `analysis_summary` 与 `one_sentence` 兜底截断改为句子边界截断并放宽至 300 字符，修复"一句话决策"以"…"截断在句中的问题。
 
 ## [3.24.1] - 2026-06-28
 
