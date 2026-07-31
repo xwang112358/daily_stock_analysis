@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """Helpers for report output language selection and localization."""
 
 from __future__ import annotations
@@ -308,6 +308,7 @@ _REPORT_LABELS: Dict[str, Dict[str, str]] = {
         "advice_label": "建议",
         "trend_label": "趋势",
         "plain_changed_heading": "今日有变",
+        "plain_reason_label": "原因",
         "plain_unchanged_heading": "维持原判",
         "plain_unchanged_note": "维持昨日建议，无新情况",
         "plain_prev_label": "昨日",
@@ -434,6 +435,7 @@ _REPORT_LABELS: Dict[str, Dict[str, str]] = {
         "advice_label": "Advice",
         "trend_label": "Trend",
         "plain_changed_heading": "Changed today",
+        "plain_reason_label": "Why",
         "plain_unchanged_heading": "Unchanged",
         "plain_unchanged_note": "same advice as yesterday, nothing new",
         "plain_prev_label": "prev",
@@ -560,6 +562,7 @@ _REPORT_LABELS: Dict[str, Dict[str, str]] = {
         "advice_label": "제안",
         "trend_label": "추세",
         "plain_changed_heading": "오늘 변경",
+        "plain_reason_label": "이유",
         "plain_unchanged_heading": "유지",
         "plain_unchanged_note": "어제와 동일한 의견, 특이사항 없음",
         "plain_prev_label": "어제",

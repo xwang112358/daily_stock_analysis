@@ -1559,18 +1559,24 @@ _OPERATION_ADVICE_KEYWORD_LABELS = (
 _OPERATION_ADVICE_MAX_LABEL_CHARS = 12
 
 
-# Plain-language dashboard block for non-professional readers (busy-reader summary)
-_PLAIN_LANGUAGE_KEYS = ("action_now", "change_condition", "key_risk")
+# Plain-language dashboard block for non-professional readers (busy-reader summary).
+# reason 允许 2-3 句（行业走势 + 个股原因），其余为单句短字段。
+_PLAIN_LANGUAGE_KEY_LIMITS = {
+    "reason": 160,
+    "action_now": 60,
+    "change_condition": 60,
+    "key_risk": 60,
+}
 
 
 def _sanitize_plain_language(value: Any) -> Dict[str, str]:
     """Keep only the known plain-language keys with non-empty string values."""
     sanitized: Dict[str, str] = {}
     if isinstance(value, dict):
-        for key in _PLAIN_LANGUAGE_KEYS:
+        for key, limit in _PLAIN_LANGUAGE_KEY_LIMITS.items():
             text = value.get(key)
             if isinstance(text, str) and text.strip():
-                sanitized[key] = _truncate_text(text.strip(), 60)
+                sanitized[key] = _truncate_text(text.strip(), limit)
     return sanitized
 
 

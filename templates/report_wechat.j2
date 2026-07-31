@@ -15,16 +15,26 @@
 
 {% for e in changed -%}
 {{ e.signal_emoji }} **{{ e.stock_name }}({{ e.result.code }})：{{ e.localized_operation_advice }}**{% if e.previous_advice %}（{{ labels.plain_prev_label }}：{{ e.previous_advice }}）{% endif %}
+{% if e.plain.get('reason') %}- {{ labels.plain_reason_label }}：{{ e.plain.get('reason') }}
+{% endif -%}
 {% if e.plain.get('action_now') %}- {{ labels.plain_action_label }}：{{ e.plain.get('action_now') }}
 {% endif -%}
 {% if e.plain.get('change_condition') %}- {{ labels.plain_condition_label }}：{{ e.plain.get('change_condition') }}
-{% endif -%}
-{% if e.plain.get('key_risk') %}- {{ labels.plain_risk_label }}：{{ e.plain.get('key_risk') }}
 {% endif %}
 {% endfor -%}
 {%- endif %}
 {%- if unchanged %}
-**{{ labels.plain_unchanged_heading }}（{{ unchanged|length }}）**：{% for e in unchanged %}{{ e.signal_emoji }}{{ e.stock_name }}·{{ e.localized_operation_advice }}{{ '，' if not loop.last }}{% endfor %} —— {{ labels.plain_unchanged_note }}
+**{{ labels.plain_unchanged_heading }}（{{ unchanged|length }}，{{ labels.plain_unchanged_note }}）**
+
+{% for e in unchanged -%}
+{{ e.signal_emoji }} **{{ e.stock_name }}({{ e.result.code }})：{{ e.localized_operation_advice }}**
+{% if e.plain.get('reason') %}- {{ labels.plain_reason_label }}：{{ e.plain.get('reason') }}
+{% endif -%}
+{% if e.plain.get('action_now') %}- {{ labels.plain_action_label }}：{{ e.plain.get('action_now') }}
+{% endif -%}
+{% if e.plain.get('change_condition') %}- {{ labels.plain_condition_label }}：{{ e.plain.get('change_condition') }}
+{% endif %}
+{% endfor -%}
 {% endif -%}
 {% else -%}
 {% for e in enriched -%}

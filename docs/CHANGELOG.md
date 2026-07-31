@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [修复] Agent 仪表盘 `analysis_summary` 与 `one_sentence` 兜底截断改为句子边界截断并放宽至 300 字符，修复"一句话决策"以"…"截断在句中的问题。
 - [新功能] 新增 `REPORT_PLAIN_SUMMARY`（默认 `false`，需配合 `REPORT_RENDERER_ENABLED=true`）：报告摘要区改为面向非专业读者的白话模式——建议与昨日不同的股票置顶展示"现在做什么/何时改变/最大风险"三行白话（新增 `dashboard.core_conclusion.plain_language` 字段，DecisionAgent 生成，缺失时由 position_advice/止损位/风险警报自动合成），建议未变的股票合并为一行"维持原判"；昨日建议经 `history_comparison_service` 查询、按动作族系（买入/持有/观望/卖出）比较，查询失败降级为全部按"有变"展示。
 - [改进] `REPORT_SUMMARY_ONLY=true` 时本地 `reports/` 报告文件始终保留全文详情（`generate_aggregate_report` 新增 `summary_only` 覆盖参数，本地归档强制全文），只有推送内容被精简；原先本地文件会跟随开关同时丢失详情。
+- [改进] 白话摘要每只股票均展示"决策 + 原因（2-3 句：行业走势 + 个股情况）+ 现在 + 何时改变"："维持原判"不再压缩为一行名单；`plain_language` 新增 `reason` 字段（DecisionAgent 白话生成，缺失时回退核心结论并剥离内部风控标记前缀），避免全员无变化时推送退化为单行。
 
 ## [3.24.1] - 2026-06-28
 

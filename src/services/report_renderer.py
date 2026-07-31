@@ -125,10 +125,28 @@ def _build_plain_language(
     provided = core.get("plain_language")
     plain: Dict[str, str] = {}
     if isinstance(provided, dict):
-        for key in ("action_now", "change_condition", "key_risk"):
+        for key, limit in (
+            ("reason", 160),
+            ("action_now", 60),
+            ("change_condition", 60),
+            ("key_risk", 60),
+        ):
             value = provided.get(key)
             if isinstance(value, str) and value.strip():
-                plain[key] = _shorten(value.strip(), 60)
+                plain[key] = _shorten(value.strip(), limit)
+
+    if "reason" not in plain:
+        # 兜底：用完整句的核心结论/摘要（半专业表述，好过无原因）
+        reason = core.get("one_sentence") or getattr(result, "analysis_summary", "") or ""
+        reason = str(reason).strip()
+        # 内部风控标记（如 "[风控下调: hold -> sell]"）对读者是噪音
+        reason = re.sub(r"^\[[^\]]{1,40}\]\s*", "", reason)
+        if len(reason) > 160:
+            window = reason[:160]
+            boundary = max(window.rfind(ch) for ch in "。！？；.!?;")
+            reason = window[: boundary + 1] if boundary >= 60 else _shorten(reason, 160)
+        if reason:
+            plain["reason"] = reason
 
     if "action_now" not in plain:
         position_advice = core.get("position_advice") or {}

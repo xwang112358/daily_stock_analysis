@@ -392,6 +392,7 @@ class TestPlainSummaryRendering(unittest.TestCase):
                         "has_position": "反弹时逐步减仓。",
                     },
                     "plain_language": {
+                        "reason": "光模块板块整体退潮降温；公司一季度利润下滑低于预期，股价跌破关键支撑，抛压沉重。",
                         "action_now": "还在下跌，别买；持有的话反弹时卖出一部分",
                         "change_condition": "跌破 388 元就全部卖出",
                         "key_risk": "利润下滑，股价可能继续走低",
@@ -420,11 +421,15 @@ class TestPlainSummaryRendering(unittest.TestCase):
         self.assertIsNotNone(out)
         self.assertIn("今日有变（1）", out)
         self.assertIn("（昨日：持有）", out)
+        self.assertIn("原因：光模块板块整体退潮降温；公司一季度利润下滑低于预期", out)
         self.assertIn("现在：还在下跌，别买；持有的话反弹时卖出一部分", out)
         self.assertIn("何时改变：跌破 388 元就全部卖出", out)
-        self.assertIn("最大风险：利润下滑，股价可能继续走低", out)
-        self.assertIn("维持原判（1）", out)
-        self.assertIn("上海电力·减仓", out)
+        self.assertIn("维持原判（1，维持昨日建议，无新情况）", out)
+        # 维持原判的股票也必须展示 决策 + 原因 + 操作
+        self.assertIn("上海电力(600021)：减仓", out)
+        unchanged_section = out.split("维持原判")[-1]
+        self.assertIn("原因：", unchanged_section)
+        self.assertIn("现在：", unchanged_section)
 
     def test_plain_summary_missing_history_counts_as_changed(self) -> None:
         result = self._plain_result()
@@ -468,9 +473,9 @@ class TestPlainSummaryRendering(unittest.TestCase):
             },
         )
         self.assertIsNotNone(out)
+        self.assertIn("原因：核心结论。", out)  # reason 缺失时回退 one_sentence
         self.assertIn("现在：反弹时降低仓位。", out)
         self.assertIn("何时改变：跌破 196 应止损离场", out)
-        self.assertIn("最大风险：主力资金持续流出", out)
 
     def test_plain_summary_off_keeps_legacy_summary(self) -> None:
         result = self._plain_result()
