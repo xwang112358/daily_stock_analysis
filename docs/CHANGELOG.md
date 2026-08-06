@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [新功能] 新增 `REPORT_PLAIN_SUMMARY`（默认 `false`，需配合 `REPORT_RENDERER_ENABLED=true`）：报告摘要区改为面向非专业读者的白话模式——建议与昨日不同的股票置顶展示"现在做什么/何时改变/最大风险"三行白话（新增 `dashboard.core_conclusion.plain_language` 字段，DecisionAgent 生成，缺失时由 position_advice/止损位/风险警报自动合成），建议未变的股票合并为一行"维持原判"；昨日建议经 `history_comparison_service` 查询、按动作族系（买入/持有/观望/卖出）比较，查询失败降级为全部按"有变"展示。
 - [改进] `REPORT_SUMMARY_ONLY=true` 时本地 `reports/` 报告文件始终保留全文详情（`generate_aggregate_report` 新增 `summary_only` 覆盖参数，本地归档强制全文），只有推送内容被精简；原先本地文件会跟随开关同时丢失详情。
 - [改进] 白话摘要每只股票均展示"决策 + 原因（2-3 句：行业走势 + 个股情况）+ 现在 + 何时改变"："维持原判"不再压缩为一行名单；`plain_language` 新增 `reason` 字段（DecisionAgent 白话生成，缺失时回退核心结论并剥离内部风控标记前缀），避免全员无变化时推送退化为单行。
+- [新功能] 筹码分布新增本地计算能力：用本地 `stock_daily` 日线按东方财富 CYQCalculator 同款算法（150 档价格网格、三角分布、换手率衰减、120 日窗口）本地计算获利比例/平均成本/90%/70% 集中度（`source=local_calc`）；换手率序列优先取 Tushare `daily_basic` 官方数据（免费积分可用，TushareFetcher 新增 `get_daily_turnover_rates`），限流/失败时退回"实时行情流通市值反推流通股本"的近似（实测与官方误差 <0.1%）；仅 A 股、fail-open、任何环节缺数据时安静放弃不影响分析主流程。默认作为外部筹码源全部失败后的兜底；设 `CHIP_LOCAL_FIRST=true`（默认 false）可将本地计算提为首选，不再先尝试外部爬虫接口（本地失败仍回退外部源）。背景：东财行情接口近期对无浏览器特征的高频客户端实施 IP 级拦截，导致筹码数据连续多日缺失。
 
 ## [3.24.1] - 2026-06-28
 

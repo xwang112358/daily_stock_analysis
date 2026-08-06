@@ -1194,9 +1194,53 @@ class TushareFetcher(BaseFetcher):
             logger.warning(f"[Tushare] 获取筹码分布失败 {stock_code}: {e}")
             return None
 
+    def get_daily_turnover_rates(
+        self,
+        stock_code: str,
+        start_date: str,
+        end_date: str,
+    ) -> Optional[Dict[str, float]]:
+        """获取官方每日换手率序列（daily_basic，免费积分可用）。
+
+        用于本地筹码计算兜底：官方换手率替代"流通市值反推"近似。
+        仅支持 A 股；失败返回 None（调用方自行降级）。
+
+        Args:
+            stock_code: 股票代码（如 600021）
+            start_date: 起始日期 YYYYMMDD
+            end_date: 结束日期 YYYYMMDD
+
+        Returns:
+            {'YYYY-MM-DD': turnover_rate_pct} 映射，失败返回 None
+        """
+        if _is_us_code(stock_code) or _is_hk_market(stock_code) or _is_etf_code(stock_code):
+            return None
+        try:
+            ts_code = self._convert_stock_code(stock_code)
+            df = self._call_api_with_rate_limit(
+                "daily_basic",
+                ts_code=ts_code,
+                start_date=start_date,
+                end_date=end_date,
+                fields="trade_date,turnover_rate",
+            )
+            if df is None or df.empty:
+                return None
+            rates: Dict[str, float] = {}
+            for _, row in df.iterrows():
+                trade_date = str(row.get("trade_date") or "")
+                rate = row.get("turnover_rate")
+                if len(trade_date) == 8 and rate is not None and pd.notna(rate):
+                    iso_date = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:]}"
+                    rates[iso_date] = float(rate)
+            return rates or None
+        except Exception as e:
+            logger.debug(f"[Tushare] 获取 {stock_code} 每日换手率失败: {e}")
+            return None
+
     def compute_cyq_metrics(self, df: pd.DataFrame, current_price: float) -> dict:
         """
-        基于 Tushare 的筹码分布明细表 (cyq_chips) 计算常用筹码指标  
+        基于 Tushare 的筹码分布明细表 (cyq_chips) 计算常用筹码指标
         :param df: 包含 'price' 和 'percent' 列的 DataFrame  
         :param current_price: 股票当天的当前价/收盘价 (用于计算获利比例)  
         :return: 包含各项筹码指标的字典  

@@ -1195,6 +1195,32 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         ],
         "warning_codes": ["cloud_deployments_may_disable"],
     },
+    "CHIP_LOCAL_FIRST": {
+        "title": "Chip Local-Calc First",
+        "description": "Compute chip distribution locally first (Tushare daily_basic turnover rates + Eastmoney-equivalent algorithm on stored daily bars) instead of trying external crawler endpoints; falls back to external sources when local calculation lacks data. A-shares only.",
+        "category": "data_source",
+        "data_type": "boolean",
+        "ui_control": "switch",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "false",
+        "options": [],
+        "validation": {},
+        "display_order": 23,
+        "help_key": "settings.data_source.ENABLE_CHIP_DISTRIBUTION",
+        "examples": [
+            "CHIP_LOCAL_FIRST=true",
+            "CHIP_LOCAL_FIRST=false",
+        ],
+        "docs": [
+            {
+                "label": "完整指南：数据源配置",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/full-guide.md#数据源配置",
+            },
+        ],
+        "warning_codes": [],
+    },
     "NEWS_MAX_AGE_DAYS": {
         "title": "News Max Age (Days)",
         "description": "Maximum age of news in days. Older articles are excluded from analysis context.",

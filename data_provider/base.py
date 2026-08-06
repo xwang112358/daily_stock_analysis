@@ -2142,6 +2142,14 @@ class DataFetcherManager:
             logger.debug(f"[筹码分布] 功能已禁用，跳过 {stock_code}")
             return None
 
+        # CHIP_LOCAL_FIRST：优先本地计算（Tushare 官方换手率 + 东财同款算法），
+        # 避免每晚先撞不稳定/被风控的外部爬虫接口；本地失败仍回退外部源
+        local_first = bool(getattr(config, "chip_local_first", False))
+        if local_first:
+            chip = self._compute_local_chip_fallback(stock_code)
+            if chip is not None:
+                return chip
+
         circuit_breaker = get_chip_circuit_breaker()
 
         candidate_fetchers = []
@@ -2224,7 +2232,137 @@ class DataFetcherManager:
                 circuit_breaker.record_failure(source_key, str(e))
                 continue
 
-        logger.warning(f"[筹码分布] {stock_code} 所有数据源均失败")
+        if not local_first:
+            chip = self._compute_local_chip_fallback(stock_code)
+            if chip is not None:
+                return chip
+
+        logger.warning(f"[筹码分布] {stock_code} 所有数据源均失败（含本地计算兜底）")
+        return None
+
+    def _compute_local_chip_fallback(self, stock_code: str):
+        """外部筹码源全部失败时，用本地日线 + 实时换手率自算筹码分布。
+
+        零网络依赖（仅实时换手率一次查询，通常已有缓存）；任何环节缺数据都
+        安静放弃（返回 None），不影响分析主流程。仅支持 A 股。
+        """
+        if not (stock_code.isdigit() and len(stock_code) == 6):
+            return None
+
+        from .local_chip_calculator import (
+            WINDOW_BARS,
+            compute_chip_distribution,
+            estimate_turnover_rates,
+        )
+
+        attempt_start = time.time()
+        try:
+            from src.storage import get_db
+
+            rows = get_db().get_latest_data(stock_code, days=WINDOW_BARS + 10)
+            if not rows:
+                return None
+            bars = [
+                {
+                    "date": row.date,
+                    "open": row.open,
+                    "high": row.high,
+                    "low": row.low,
+                    "close": row.close,
+                    "volume": row.volume,
+                }
+                for row in reversed(rows)  # 降序 -> 升序
+                if row.open is not None and row.close is not None
+                and row.high is not None and row.low is not None
+            ]
+
+            quote = self.get_realtime_quote(stock_code, log_final_failure=False)
+            current_price = getattr(quote, "price", None) if quote else None
+            circ_mv = getattr(quote, "circ_mv", None) if quote else None
+            float_shares = None
+            if circ_mv and current_price:
+                try:
+                    float_shares = float(circ_mv) / float(current_price)
+                except (TypeError, ValueError, ZeroDivisionError):
+                    float_shares = None
+            approx_rates = estimate_turnover_rates(
+                [bar["volume"] or 0 for bar in bars],
+                float_shares=float_shares,
+                latest_turnover_rate_pct=getattr(quote, "turnover_rate", None) if quote else None,
+            )
+
+            # 换手率优先用 Tushare daily_basic 官方序列（免费积分可用），
+            # 缺失交易日用流通市值推算值补齐；官方不可用时整体退回推算。
+            official_rates = self._get_official_turnover_rates(stock_code, bars)
+            rates = None
+            if official_rates:
+                official_avg = sum(official_rates.values()) / len(official_rates)
+                rates = []
+                for index, bar in enumerate(bars):
+                    key = str(bar["date"])[:10]
+                    if key in official_rates:
+                        rates.append(official_rates[key])
+                    elif approx_rates is not None:
+                        rates.append(approx_rates[index])
+                    else:
+                        rates.append(official_avg)
+            elif approx_rates is not None:
+                rates = approx_rates
+            if rates is None:
+                logger.debug(f"[筹码分布] {stock_code} 本地兜底缺少流通股本/换手率，放弃")
+                return None
+            chip = compute_chip_distribution(
+                bars,
+                rates,
+                code=stock_code,
+                current_price=current_price,
+            )
+            latency_ms = int((time.time() - attempt_start) * 1000)
+            if chip is None:
+                record_provider_run(
+                    data_type="chip",
+                    provider="LocalChipCalc",
+                    operation="get_chip_distribution",
+                    success=False,
+                    latency_ms=latency_ms,
+                    error_type="empty",
+                    error_message="insufficient local bars or turnover data",
+                    record_count=0,
+                )
+                return None
+            record_provider_run(
+                data_type="chip",
+                provider="LocalChipCalc",
+                operation="get_chip_distribution",
+                success=True,
+                latency_ms=latency_ms,
+                record_count=1,
+            )
+            logger.info(
+                f"[筹码分布] {stock_code} 外部源失败，本地计算兜底成功: "
+                f"获利比例={chip.profit_ratio:.1%}, 平均成本={chip.avg_cost}, "
+                f"90%集中度={chip.concentration_90:.2%} (source: local_calc)"
+            )
+            return chip
+        except Exception as e:
+            logger.warning(f"[筹码分布] {stock_code} 本地计算兜底异常: {e}")
+            return None
+
+    def _get_official_turnover_rates(self, stock_code: str, bars) -> Optional[Dict[str, float]]:
+        """尝试从 TushareFetcher 获取官方每日换手率映射（fail-open）。"""
+        if not bars:
+            return None
+        try:
+            for fetcher in self._get_fetchers_snapshot():
+                if not hasattr(fetcher, "get_daily_turnover_rates"):
+                    continue
+                start = str(bars[0]["date"])[:10].replace("-", "")
+                end = str(bars[-1]["date"])[:10].replace("-", "")
+                if len(start) != 8 or len(end) != 8:
+                    return None
+                return fetcher.get_daily_turnover_rates(stock_code, start, end)
+        except Exception as e:
+            logger.debug(f"[筹码分布] {stock_code} 官方换手率获取失败，退回推算: {e}")
         return None
 
     def get_stock_name(self, stock_code: str, allow_realtime: bool = True) -> Optional[str]:
